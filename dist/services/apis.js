@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Token Launch Screener MCP — External API Clients
  *
@@ -10,18 +9,7 @@
  * Design principle: every function returns null / [] / 0 on error rather than
  * throwing. The screener builds its verdict from whatever data is available.
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.resolveChainId = resolveChainId;
-exports.getDexScreenerData = getDexScreenerData;
-exports.getGoPlusTokenSecurity = getGoPlusTokenSecurity;
-exports.getContractCreationTx = getContractCreationTx;
-exports.getDeployerPreviousContracts = getDeployerPreviousContracts;
-exports.getEarlyBuyers = getEarlyBuyers;
-exports.flagSniperWallets = flagSniperWallets;
-const axios_1 = __importDefault(require("axios"));
+import axios from "axios";
 // ─── Constants ────────────────────────────────────────────────────────────────
 const TIMEOUT_MS = 10000;
 const SNIPER_SAMPLE_SIZE = 20; // Max wallets to deep-check (keeps latency under 30s)
@@ -48,7 +36,7 @@ const CHAIN_ID_MAP = {
  * Resolves a chain name or raw ID to a numeric chain ID string.
  * e.g. "base" → "8453", "137" → "137"
  */
-function resolveChainId(chain) {
+export function resolveChainId(chain) {
     return CHAIN_ID_MAP[chain.toLowerCase()] ?? chain;
 }
 // ─── DexScreener ─────────────────────────────────────────────────────────────
@@ -56,9 +44,9 @@ function resolveChainId(chain) {
  * Fetches the highest-liquidity trading pair for a token from DexScreener.
  * Returns null if the token has no pairs or the request fails.
  */
-async function getDexScreenerData(contractAddress) {
+export async function getDexScreenerData(contractAddress) {
     try {
-        const res = await axios_1.default.get(`https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`, { timeout: TIMEOUT_MS });
+        const res = await axios.get(`https://api.dexscreener.com/latest/dex/tokens/${contractAddress}`, { timeout: TIMEOUT_MS });
         const pairs = res.data?.pairs;
         if (!pairs?.length)
             return null;
@@ -75,9 +63,9 @@ async function getDexScreenerData(contractAddress) {
  * Covers: honeypot detection, buy/sell tax, mintability, blacklist, ownership.
  * No API key required — completely free.
  */
-async function getGoPlusTokenSecurity(chainId, contractAddress) {
+export async function getGoPlusTokenSecurity(chainId, contractAddress) {
     try {
-        const res = await axios_1.default.get(`https://api.gopluslabs.io/api/v1/token_security/${chainId}`, {
+        const res = await axios.get(`https://api.gopluslabs.io/api/v1/token_security/${chainId}`, {
             params: { contract_addresses: contractAddress.toLowerCase() },
             timeout: TIMEOUT_MS,
         });
@@ -99,9 +87,9 @@ async function getGoPlusTokenSecurity(chainId, contractAddress) {
 /**
  * Retrieves the contract deployer address and deployment timestamp.
  */
-async function getContractCreationTx(chainId, contractAddress, apiKey) {
+export async function getContractCreationTx(chainId, contractAddress, apiKey) {
     try {
-        const res = await axios_1.default.get(ETHERSCAN_V2, {
+        const res = await axios.get(ETHERSCAN_V2, {
             params: {
                 chainid: chainId,
                 module: "contract",
@@ -129,9 +117,9 @@ async function getContractCreationTx(chainId, contractAddress, apiKey) {
  * Counts how many contracts the deployer has previously deployed.
  * High count (>3) is a strong serial-launcher signal.
  */
-async function getDeployerPreviousContracts(chainId, deployerAddress, apiKey) {
+export async function getDeployerPreviousContracts(chainId, deployerAddress, apiKey) {
     try {
-        const res = await axios_1.default.get(ETHERSCAN_V2, {
+        const res = await axios.get(ETHERSCAN_V2, {
             params: {
                 chainid: chainId,
                 module: "account",
@@ -156,9 +144,9 @@ async function getDeployerPreviousContracts(chainId, deployerAddress, apiKey) {
  * Returns the first 50 unique buyer wallet addresses from token transfer history.
  * Earlier wallets = higher sniper suspicion.
  */
-async function getEarlyBuyers(chainId, contractAddress, apiKey) {
+export async function getEarlyBuyers(chainId, contractAddress, apiKey) {
     try {
-        const res = await axios_1.default.get(ETHERSCAN_V2, {
+        const res = await axios.get(ETHERSCAN_V2, {
             params: {
                 chainid: chainId,
                 module: "account",
@@ -195,13 +183,13 @@ async function getEarlyBuyers(chainId, contractAddress, apiKey) {
  *
  * Checks up to SNIPER_SAMPLE_SIZE wallets in parallel to stay within latency budget.
  */
-async function flagSniperWallets(chainId, wallets, apiKey) {
+export async function flagSniperWallets(chainId, wallets, apiKey) {
     const snipers = [];
     const bundlers = [];
     const sample = wallets.slice(0, SNIPER_SAMPLE_SIZE);
     await Promise.allSettled(sample.map(async (wallet) => {
         try {
-            const res = await axios_1.default.get(ETHERSCAN_V2, {
+            const res = await axios.get(ETHERSCAN_V2, {
                 params: {
                     chainid: chainId,
                     module: "account",

@@ -1,4 +1,3 @@
-"use strict";
 /**
  * Token Launch Screener MCP — Core Screening Logic
  *
@@ -10,9 +9,7 @@
  *   CAUTION     – multiple warning signals without hard proof of malice
  *   SAFE        – no significant flags detected
  */
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.screenToken = screenToken;
-const apis_js_1 = require("../services/apis.js");
+import { getDexScreenerData, getGoPlusTokenSecurity, getContractCreationTx, getDeployerPreviousContracts, getEarlyBuyers, flagSniperWallets, resolveChainId, } from "../services/apis.js";
 // ─── Risk Thresholds ──────────────────────────────────────────────────────────
 const THRESHOLDS = {
     MIN_LIQUIDITY_USD: 5000, // Below this = illiquid / easy rug
@@ -33,14 +30,14 @@ const THRESHOLDS = {
  * @param chain           - Chain name ("base", "ethereum") or raw chain ID
  * @param etherscanKey    - Etherscan V2 API key
  */
-async function screenToken(contractAddress, chain, etherscanKey) {
-    const chainId = (0, apis_js_1.resolveChainId)(chain);
+export async function screenToken(contractAddress, chain, etherscanKey) {
+    const chainId = resolveChainId(chain);
     const riskFlags = [];
     // ── Phase 1: Fetch all primary data sources in parallel ──────────────────
     const [dexData, goplusData, creationData] = await Promise.all([
-        (0, apis_js_1.getDexScreenerData)(contractAddress),
-        (0, apis_js_1.getGoPlusTokenSecurity)(chainId, contractAddress),
-        (0, apis_js_1.getContractCreationTx)(chainId, contractAddress, etherscanKey),
+        getDexScreenerData(contractAddress),
+        getGoPlusTokenSecurity(chainId, contractAddress),
+        getContractCreationTx(chainId, contractAddress, etherscanKey),
     ]);
     // ── Token Identity ────────────────────────────────────────────────────────
     const tokenName = goplusData?.token_name ?? dexData?.baseToken?.name ?? "Unknown";
@@ -65,7 +62,7 @@ async function screenToken(contractAddress, chain, etherscanKey) {
     let deployerPreviousContracts = 0;
     let deployerFlagged = false;
     if (deployerAddress && etherscanKey) {
-        deployerPreviousContracts = await (0, apis_js_1.getDeployerPreviousContracts)(chainId, deployerAddress, etherscanKey);
+        deployerPreviousContracts = await getDeployerPreviousContracts(chainId, deployerAddress, etherscanKey);
         if (deployerPreviousContracts > THRESHOLDS.SERIAL_LAUNCHER_THRESHOLD) {
             deployerFlagged = true;
             riskFlags.push(`Deployer has launched ${deployerPreviousContracts} previous contracts (serial launcher pattern)`);
@@ -103,10 +100,10 @@ async function screenToken(contractAddress, chain, etherscanKey) {
         riskFlags.push("Blacklist function present — wallets can be frozen");
     // ── Phase 3: Early Buyer / Sniper Analysis ────────────────────────────────
     const earlyBuyers = etherscanKey
-        ? await (0, apis_js_1.getEarlyBuyers)(chainId, contractAddress, etherscanKey)
+        ? await getEarlyBuyers(chainId, contractAddress, etherscanKey)
         : [];
     const { snipers, bundlers } = earlyBuyers.length > 0
-        ? await (0, apis_js_1.flagSniperWallets)(chainId, earlyBuyers, etherscanKey)
+        ? await flagSniperWallets(chainId, earlyBuyers, etherscanKey)
         : { snipers: [], bundlers: [] };
     const sniperHeldPercent = earlyBuyers.length > 0
         ? Math.round((snipers.length / earlyBuyers.length) * 100)

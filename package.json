@@ -1,6 +1,7 @@
 {
   "name": "token-launch-screener-mcp-server",
   "version": "1.0.0",
+  "type": "module",
   "description": "MCP server for real-time EVM token launch risk screening — GoPlus + DexScreener + Etherscan V2",
   "main": "dist/index.js",
   "scripts": {

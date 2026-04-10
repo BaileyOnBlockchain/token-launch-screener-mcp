@@ -1,31 +1,26 @@
-"use strict";
 /**
  * Token Launch Screener — MCP Server Entry Point
  */
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
-Object.defineProperty(exports, "__esModule", { value: true });
-const mcp_js_1 = require("@modelcontextprotocol/sdk/server/mcp.js");
-const streamableHttp_js_1 = require("@modelcontextprotocol/sdk/server/streamableHttp.js");
-const stdio_js_1 = require("@modelcontextprotocol/sdk/server/stdio.js");
-const sdk_1 = require("@ctxprotocol/sdk");
-const express_1 = __importDefault(require("express"));
-const zod_1 = require("zod");
-const screen_token_js_1 = require("./tools/screen_token.js");
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createContextMiddleware } from "@ctxprotocol/sdk";
+import express from "express";
+import { z } from "zod";
+import { screenToken } from "./tools/screen_token.js";
 // ─── Server Initialisation ────────────────────────────────────────────────────
-const server = new mcp_js_1.McpServer({
+const server = new McpServer({
     name: "token-launch-screener-mcp-server",
     version: "1.0.0",
 });
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY ?? "";
 // ─── Input Schema ─────────────────────────────────────────────────────────────
 const screenInputSchema = {
-    contract_address: zod_1.z
+    contract_address: z
         .string()
         .regex(/^0x[a-fA-F0-9]{40}$/, "Must be a valid EVM address: '0x' followed by exactly 40 hex characters")
         .describe("EVM token contract address to screen. Example: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
-    chain: zod_1.z
+    chain: z
         .string()
         .describe("Target chain. Accepts name or ID: ethereum (1), base (8453), bsc (56), polygon (137), arbitrum (42161), optimism (10). Default: base"),
 };
@@ -90,7 +85,7 @@ async (params) => {
         };
     }
     try {
-        const result = await (0, screen_token_js_1.screenToken)(contract_address, resolvedChain, ETHERSCAN_API_KEY);
+        const result = await screenToken(contract_address, resolvedChain, ETHERSCAN_API_KEY);
         return {
             content: [{
                     type: "text",
@@ -111,10 +106,10 @@ async (params) => {
 });
 // ─── HTTP Transport ───────────────────────────────────────────────────────────
 async function runHTTP() {
-    const app = (0, express_1.default)();
-    app.use(express_1.default.json());
+    const app = express();
+    app.use(express.json());
     // Context Protocol auth middleware — required for paid requests
-    app.use((0, sdk_1.createContextMiddleware)());
+    app.use(createContextMiddleware());
     app.get("/health", (_req, res) => {
         res.json({
             status: "ok",
@@ -133,7 +128,7 @@ async function runHTTP() {
         });
     });
     app.post("/mcp", async (req, res) => {
-        const transport = new streamableHttp_js_1.StreamableHTTPServerTransport({
+        const transport = new StreamableHTTPServerTransport({
             sessionIdGenerator: undefined,
             enableJsonResponse: true,
         });
@@ -151,7 +146,7 @@ async function runHTTP() {
 }
 // ─── stdio Transport ──────────────────────────────────────────────────────────
 async function runStdio() {
-    const transport = new stdio_js_1.StdioServerTransport();
+    const transport = new StdioServerTransport();
     await server.connect(transport);
     console.error("Token Launch Screener MCP running on stdio");
 }
