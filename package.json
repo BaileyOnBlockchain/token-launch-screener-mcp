@@ -10,7 +10,7 @@
     "clean": "rm -rf dist"
   },
   "keywords": ["mcp", "crypto", "defi", "token-screener", "rug-check", "etherscan", "goplus"],
-  "author": "Bailey (@blockchainbail) <baileyethanch@gmail.com>",
+  "author": "Bailey (@blockchainbail) <baileyethanspurs4@gmail.com>",
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
