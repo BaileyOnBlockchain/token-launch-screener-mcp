@@ -1,24 +1,11 @@
 /**
  * Token Launch Screener — MCP Server Entry Point
- *
- * Exposes a single MCP tool: screen_new_token
- *
- * Aggregates GoPlus Security, DexScreener, and Etherscan V2 into one
- * composite risk verdict for newly launched EVM tokens. Replaces the manual
- * workflow of checking 4–5 sites before entering a position.
- *
- * Transport: Streamable HTTP (default) or stdio (set TRANSPORT=stdio)
- * Port:      3000 (override with PORT env var)
- *
- * Environment variables:
- *   ETHERSCAN_API_KEY  - Required. Etherscan V2 API key (etherscan.io/apikey)
- *   PORT               - Optional. HTTP port (default: 3000)
- *   TRANSPORT          - Optional. "http" | "stdio" (default: "http")
  */
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { createContextMiddleware } from "@ctxprotocol/sdk";
 import express, { Request, Response } from "express";
 import { z } from "zod";
 import { screenToken } from "./tools/screen_token.js";
@@ -54,7 +41,6 @@ const screenInputSchema = {
 // ─── Tool Registration ────────────────────────────────────────────────────────
 
 // @ts-ignore — TS2589: false positive with MCP SDK v1.29 generic inference depth
-// @ts-ignore — TS2589: MCP SDK v1.29 generic inference depth false positive
 server.registerTool(
   "screen_new_token",
   {
@@ -64,11 +50,11 @@ server.registerTool(
 Replaces the manual workflow of checking DexScreener + DEXTools Pro + Token Sniffer + Etherscan separately ($99/month combined). Returns structured, actionable data from one call.
 
 WHAT IT CHECKS:
-• Honeypot detection and buy/sell tax (GoPlus — no API key required, very reliable)
-• Liquidity size and lock status (DexScreener)
-• Contract age and deployer serial-launcher history (Etherscan V2)
-• First 50 buyer wallets — flagged for sniper/bundler patterns (Etherscan V2)
-• Composite risk verdict: SAFE / CAUTION / LIKELY_RUG
+- Honeypot detection and buy/sell tax (GoPlus — no API key required, very reliable)
+- Liquidity size and lock status (DexScreener)
+- Contract age and deployer serial-launcher history (Etherscan V2)
+- First 50 buyer wallets — flagged for sniper/bundler patterns (Etherscan V2)
+- Composite risk verdict: SAFE / CAUTION / LIKELY_RUG
 
 ARGS:
   contract_address (string, required) — EVM contract address starting with 0x
@@ -76,35 +62,16 @@ ARGS:
 
 RETURNS:
 {
-  contract_address:            string,
-  chain:                       string,
-  screened_at:                 string,   // ISO 8601 timestamp
-  token_name:                  string,
-  token_symbol:                string,
-  decimals:                    number,
-  contract_age_hours:          number,
-  deployer_address:            string,
-  deployer_previous_contracts: number,
-  deployer_flagged:            boolean,  // true = serial launcher detected
-  liquidity_usd:               number,
-  liquidity_locked:            boolean,
-  is_honeypot:                 boolean,
-  buy_tax_percent:             number,
-  sell_tax_percent:            number,
-  is_mintable:                 boolean,
-  has_blacklist:               boolean,
-  owner_can_change_balance:    boolean,
-  first_buyers_count:          number,
-  sniper_count:                number,
-  bundler_count:               number,
-  sniper_held_percent:         number,   // % of early buyers flagged as snipers
-  risk_score:                  "SAFE" | "CAUTION" | "LIKELY_RUG",
-  risk_flags:                  string[], // Plain-English list of triggered flags
-  summary:                     string    // Human-readable one-block verdict
+  contract_address, chain, screened_at, token_name, token_symbol, decimals,
+  contract_age_hours, deployer_address, deployer_previous_contracts, deployer_flagged,
+  liquidity_usd, liquidity_locked, is_honeypot, buy_tax_percent, sell_tax_percent,
+  is_mintable, has_blacklist, owner_can_change_balance, first_buyers_count,
+  sniper_count, bundler_count, sniper_held_percent,
+  risk_score: "SAFE" | "CAUTION" | "LIKELY_RUG", risk_flags: string[], summary: string
 }
 
-USE WHEN: "Is 0xabc safe to ape?", "Quick rug check on [address]", "Screen this token on base", "Sniper check [contract]"
-SKIP FOR: Tokens older than 7 days (use a fundamentals tool instead)`,
+USE WHEN: "Is 0xabc safe to ape?", "Quick rug check on [address]", "Screen this token on base"
+SKIP FOR: Tokens older than 7 days`,
     inputSchema: screenInputSchema,
     annotations: {
       readOnlyHint:    true,
@@ -113,7 +80,6 @@ SKIP FOR: Tokens older than 7 days (use a fundamentals tool instead)`,
       openWorldHint:   true,
     },
   },
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   // @ts-ignore
   async (params: any) => {
     const contract_address: string = params.contract_address;
@@ -139,7 +105,6 @@ SKIP FOR: Tokens older than 7 days (use a fundamentals tool instead)`,
 
     try {
       const result = await screenToken(contract_address, resolvedChain, ETHERSCAN_API_KEY);
-
       return {
         content: [{
           type: "text" as const,
@@ -165,7 +130,9 @@ async function runHTTP(): Promise<void> {
   const app = express();
   app.use(express.json());
 
-  /** Health check — used by Railway / Render / Fly.io for uptime monitoring */
+  // Context Protocol auth middleware — required for paid requests
+  app.use(createContextMiddleware());
+
   app.get("/health", (_req: Request, res: Response) => {
     res.json({
       status:  "ok",
@@ -185,7 +152,6 @@ async function runHTTP(): Promise<void> {
     });
   });
 
-  /** MCP endpoint — stateless per-request transport */
   app.post("/mcp", async (req: Request, res: Response) => {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,
