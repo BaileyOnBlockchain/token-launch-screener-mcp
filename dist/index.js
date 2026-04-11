@@ -24,6 +24,20 @@ const screenInputSchema = {
         .string()
         .describe("Target chain. Accepts name or ID: ethereum (1), base (8453), bsc (56), polygon (137), arbitrum (42161), optimism (10). Default: base"),
 };
+// ─── Verdict Helpers ──────────────────────────────────────────────────────────
+const VERDICT_MAP = {
+    SAFE: "SAFE",
+    CAUTION: "RISKY",
+    LIKELY_RUG: "CRITICAL",
+};
+/** Derives a 0–100 numeric risk score from the categorical verdict + flag count. */
+function toNumericScore(riskScore, flagCount) {
+    if (riskScore === "LIKELY_RUG")
+        return Math.min(100, 75 + flagCount * 5);
+    if (riskScore === "CAUTION")
+        return Math.min(65, 40 + flagCount * 5);
+    return Math.min(30, flagCount * 8);
+}
 // ─── Tool Registration ────────────────────────────────────────────────────────
 // @ts-ignore — TS2589: false positive with MCP SDK v1.29 generic inference depth
 server.registerTool("screen_new_token", {
@@ -45,17 +59,28 @@ ARGS:
 
 RETURNS:
 {
-  contract_address, chain, screened_at, token_name, token_symbol, decimals,
-  contract_age_hours, deployer_address, deployer_previous_contracts, deployer_flagged,
-  liquidity_usd, liquidity_locked, is_honeypot, buy_tax_percent, sell_tax_percent,
-  is_mintable, has_blacklist, owner_can_change_balance, first_buyers_count,
-  sniper_count, bundler_count, sniper_held_percent,
-  risk_score: "SAFE" | "CAUTION" | "LIKELY_RUG", risk_flags: string[], summary: string
+  verdict: "SAFE" | "RISKY" | "CRITICAL",
+  risk_score: number (0–100),
+  token_address, chain, flags: string[], summary: string,
+  sources: { goplus, dexscreener, etherscan }
 }
 
 USE WHEN: "Is 0xabc safe to ape?", "Quick rug check on [address]", "Screen this token on base"
 SKIP FOR: Tokens older than 7 days`,
     inputSchema: screenInputSchema,
+    outputSchema: {
+        verdict: z.enum(["SAFE", "RISKY", "CRITICAL"]),
+        risk_score: z.number().min(0).max(100),
+        token_address: z.string(),
+        chain: z.string(),
+        flags: z.array(z.string()),
+        summary: z.string(),
+        sources: z.object({
+            goplus: z.object({}).passthrough(),
+            dexscreener: z.object({}).passthrough(),
+            etherscan: z.object({}).passthrough(),
+        }).optional(),
+    },
     annotations: {
         readOnlyHint: true,
         destructiveHint: false,
@@ -86,11 +111,23 @@ async (params) => {
     }
     try {
         const result = await screenToken(contract_address, resolvedChain, ETHERSCAN_API_KEY);
+        const structured = {
+            verdict: VERDICT_MAP[result.risk_score] ?? "RISKY",
+            risk_score: toNumericScore(result.risk_score, result.risk_flags.length),
+            token_address: result.contract_address,
+            chain: result.chain,
+            flags: result.risk_flags,
+            summary: result.summary,
+            sources: { goplus: {}, dexscreener: {}, etherscan: {} },
+        };
         return {
             content: [{
                     type: "text",
-                    text: result.summary + "\n\n" + JSON.stringify(result, null, 2),
+                    text: result.summary + "\n\n" + JSON.stringify(structured, null, 2),
                 }],
+            structuredContent: structured,
+            // @ts-ignore — _meta is a CTX Protocol extension for per-call pricing
+            _meta: { pricing: { executeUsd: 0.0005 } },
         };
     }
     catch (err) {
