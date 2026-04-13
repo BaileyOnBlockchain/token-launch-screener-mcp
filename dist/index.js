@@ -13,10 +13,12 @@ const screenInputSchema = {
     contract_address: z
         .string()
         .regex(/^0x[a-fA-F0-9]{40}$/, "Must be a valid EVM address: '0x' followed by exactly 40 hex characters")
-        .describe("EVM token contract address to screen. Example: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+        .describe("EVM token contract address to screen. Must start with 0x followed by 40 hex characters. Extract directly from user message. Example: 0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
     chain: z
         .string()
-        .describe("Target chain. Accepts name or ID: ethereum (1), base (8453), bsc (56), polygon (137), arbitrum (42161), optimism (10). Default: base"),
+        .optional()
+        .default("base")
+        .describe("Blockchain to query. Extract from user message if mentioned (e.g. 'on base', 'on ethereum', 'on bsc'). Accepted values: ethereum, base, bsc, polygon, arbitrum, optimism, or numeric chain ID. Defaults to 'base' if not specified."),
 };
 const screenOutputSchema = {
     verdict: z.enum(["SAFE", "RISKY", "CRITICAL"]),
@@ -83,8 +85,8 @@ RETURNS:
   sources: { goplus, dexscreener, etherscan }
 }
 
-USE WHEN: "Is 0xabc safe to ape?", "Quick rug check on [address]", "Screen this token on base"
-SKIP FOR: Tokens older than 7 days`,
+USE WHEN: user provides a 0x contract address and asks to screen/check/rug-check/analyze it. Trigger phrases: "screen this token", "rug check", "is this safe", "check this contract", "analyze this token". Extract contract_address (the 0x... address) and chain (the network name if mentioned, otherwise default to base).
+SKIP FOR: Tokens older than 7 days, general crypto questions without a specific address`,
         inputSchema: screenInputSchema,
         outputSchema: screenOutputSchema,
         annotations: {
