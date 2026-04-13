@@ -31,20 +31,6 @@ const screenInputSchema = {
     ),
 };
 
-const screenOutputSchema = {
-  verdict:       z.enum(["SAFE", "RISKY", "CRITICAL"]),
-  risk_score:    z.number().min(0).max(100),
-  token_address: z.string(),
-  chain:         z.string(),
-  flags:         z.array(z.string()),
-  summary:       z.string(),
-  sources:       z.object({
-    goplus:      z.record(z.string(), z.unknown()),
-    dexscreener: z.record(z.string(), z.unknown()),
-    etherscan:   z.record(z.string(), z.unknown()),
-  }),
-};
-
 // ─── Verdict Helpers ──────────────────────────────────────────────────────────
 
 const VERDICT_MAP: Record<string, "SAFE" | "RISKY" | "CRITICAL"> = {
@@ -106,15 +92,12 @@ RETURNS:
 USE WHEN: user provides a 0x contract address and asks to screen/check/rug-check/analyze it. Trigger phrases: "screen this token", "rug check", "is this safe", "check this contract", "analyze this token". Extract contract_address (the 0x... address) and chain (the network name if mentioned, otherwise default to base).
 SKIP FOR: Tokens older than 7 days, general crypto questions without a specific address`,
       inputSchema:  screenInputSchema,
-      outputSchema: screenOutputSchema,
       annotations: {
         readOnlyHint:    true,
         destructiveHint: false,
         idempotentHint:  false,
         openWorldHint:   true,
       },
-      // CTX Protocol per-call pricing declaration
-      _meta: { pricing: { executeUsd: 0.0005 } },
     },
     // @ts-ignore
     async (params: any) => {
