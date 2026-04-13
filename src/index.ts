@@ -128,8 +128,14 @@ SKIP FOR: Tokens older than 7 days, general crypto questions without a specific 
         idempotentHint:  false,
         openWorldHint:   true,
       },
-      // CTX Protocol per-call pricing declaration
-      _meta: { pricing: { executeUsd: 0.0005 } },
+      // CTX Protocol metadata — surface + eligibility required for probe routing
+      _meta: {
+        surface:          "execute",
+        executeEligible:  true,
+        queryEligible:    false,
+        latencyClass:     "fast",
+        pricing:          { executeUsd: "0.0005" },
+      },
     },
     // @ts-ignore
     async (params: any) => {
