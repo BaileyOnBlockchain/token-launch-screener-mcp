@@ -278,10 +278,10 @@ async function runHTTP(): Promise<void> {
 
   const port = parseInt(process.env.PORT ?? "3000");
   app.listen(port, () => {
-    console.log(`Token Launch Screener MCP running`);
-    console.log(`   Endpoint : http://localhost:${port}/mcp`);
-    console.log(`   Health   : http://localhost:${port}/health`);
-    console.log(`   Etherscan: ${ETHERSCAN_API_KEY ? "configured" : "NOT SET"}`);
+    process.stderr.write(`Token Launch Screener MCP running\n`);
+    process.stderr.write(`   Endpoint : http://localhost:${port}/mcp\n`);
+    process.stderr.write(`   Health   : http://localhost:${port}/health\n`);
+    process.stderr.write(`   Etherscan: ${ETHERSCAN_API_KEY ? "configured" : "NOT SET"}\n`);
   });
 }
 
