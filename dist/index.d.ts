@@ -1,5 +1,5 @@
 /**
  * Token Launch Screener — MCP Server Entry Point
  */
-export {};
+import 'dotenv/config';
 //# sourceMappingURL=index.d.ts.map
