@@ -259,6 +259,13 @@ async function runHTTP(): Promise<void> {
   // instance; reusing the server across requests causes "Already connected"
   // errors that break the platform's initialize → tools/list handshake.
   app.post("/mcp", async (req: Request, res: Response) => {
+    // StreamableHTTPServerTransport requires Accept to include both content types.
+    // Some clients (including the CTX probe) omit text/event-stream, which causes
+    // a -32000 "Not Acceptable" error before the request reaches the tool list.
+    if (!req.headers.accept?.includes("text/event-stream")) {
+      req.headers.accept = "application/json, text/event-stream";
+    }
+
     const server = createMcpServer();
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: undefined,   // stateless — no session tracking
