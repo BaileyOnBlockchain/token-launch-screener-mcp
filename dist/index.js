@@ -71,6 +71,18 @@ function toNumericScore(riskScore, flagCount) {
         return Math.min(65, 40 + flagCount * 5);
     return Math.min(30, flagCount * 8);
 }
+const resultCache = new Map();
+const CACHE_MAX = 100;
+function cacheSet(address, chain, entry) {
+    const key = `${address.toLowerCase()}:${chain}`;
+    if (resultCache.size >= CACHE_MAX) {
+        resultCache.delete(resultCache.keys().next().value);
+    }
+    resultCache.set(key, entry);
+}
+function cacheGet(address, chain) {
+    return resultCache.get(`${address.toLowerCase()}:${chain}`);
+}
 // ─── Server Factory ──────────────────────────────────────────────────────────
 //
 // A fresh McpServer is created per HTTP request (stateless mode).
@@ -160,6 +172,10 @@ SKIP FOR: Tokens older than 7 days, general crypto questions without a specific 
                     sniper_held_percent: result.sniper_held_percent,
                 }),
             };
+            cacheSet(contract_address, resolvedChain, {
+                structured,
+                cached_at: new Date().toISOString(),
+            });
             return {
                 content: [{
                         type: "text",
@@ -180,6 +196,91 @@ SKIP FOR: Tokens older than 7 days, general crypto questions without a specific 
                 isError: true,
             };
         }
+    });
+    // ── Query tool: returns cached risk card without live API calls
+    // queryEligible:true lets the platform surface this for skill/agent discovery.
+    // @ts-ignore — TS2589: false positive with MCP SDK v1.29 generic inference depth
+    server.registerTool("get_token_risk_summary", {
+        title: "Token Risk Summary (Cached)",
+        description: `Returns the most recent cached risk card for a token that was already screened this session. Use this first to avoid redundant live API calls — if it returns a cache miss, then call screen_new_token.
+
+Returns the same structured fields as screen_new_token (verdict, risk_score, flags, summary) plus the cached_at timestamp.
+
+USE WHEN: checking whether a token has already been screened, or retrieving a previous result without triggering new network calls.
+SKIP WHEN: the token has not been screened yet (cache miss → call screen_new_token instead).`,
+        inputSchema: {
+            address: z
+                .string()
+                .regex(/^0x[a-fA-F0-9]{40}$/, "Must be a valid EVM address: '0x' followed by exactly 40 hex characters")
+                .describe("EVM token contract address to look up"),
+            chain: z
+                .string()
+                .optional()
+                .default("base")
+                .describe("Blockchain. Accepted: ethereum, base, bsc, polygon, arbitrum, optimism. Default: base"),
+        },
+        outputSchema: {
+            hit: z.boolean().describe("true if a cached result was found"),
+            cached_at: z.string().describe("ISO 8601 timestamp of the original screen, or empty on cache miss"),
+            verdict: z.string().describe("SAFE, RISKY, or CRITICAL — empty on cache miss"),
+            risk_score: z.number().min(0).max(100).describe("Numeric risk score 0–100, or 0 on cache miss"),
+            token_address: z.string().describe("The contract address, or empty on cache miss"),
+            chain: z.string().describe("The blockchain, or empty on cache miss"),
+            flags: z.array(z.string()).describe("Risk flags detected, or empty on cache miss"),
+            summary: z.string().describe("Risk summary, or a cache-miss message"),
+        },
+        annotations: {
+            readOnlyHint: true,
+            destructiveHint: false,
+            idempotentHint: true,
+            openWorldHint: false,
+        },
+        // @ts-ignore — CTX Protocol extension
+        _meta: {
+            surface: "query",
+            executeEligible: false,
+            queryEligible: true,
+            latencyClass: "instant",
+            pricing: { queryUsd: "0.00" },
+        },
+    }, 
+    // @ts-ignore
+    async (params) => {
+        const address = params.address;
+        const chain = params.chain ?? "base";
+        const cached = cacheGet(address, chain);
+        if (!cached) {
+            const miss = {
+                hit: false,
+                cached_at: "",
+                verdict: "",
+                risk_score: 0,
+                token_address: "",
+                chain: "",
+                flags: [],
+                summary: `No cached result for ${address} on ${chain}. Call screen_new_token to run a live screen.`,
+            };
+            return {
+                content: [{ type: "text", text: miss.summary }],
+                structuredContent: miss,
+            };
+        }
+        const hit = {
+            hit: true,
+            cached_at: cached.cached_at,
+            verdict: cached.structured.verdict,
+            risk_score: cached.structured.risk_score,
+            token_address: cached.structured.token_address,
+            chain: cached.structured.chain,
+            flags: cached.structured.flags,
+            summary: cached.structured.summary,
+        };
+        return {
+            content: [{ type: "text", text: `[Cached ${cached.cached_at}]\n\n${cached.structured.summary}` }],
+            structuredContent: hit,
+            // @ts-ignore
+            _meta: { pricing: { queryUsd: 0.00 } },
+        };
     });
     return server;
 }
