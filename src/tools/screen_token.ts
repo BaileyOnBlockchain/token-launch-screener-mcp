@@ -19,6 +19,7 @@ import {
   getEarlyBuyers,
   flagSniperWallets,
   resolveChainId,
+  hasExplorerKey,
 } from "../services/apis.js";
 
 // ─── Risk Thresholds ──────────────────────────────────────────────────────────
@@ -42,12 +43,10 @@ const THRESHOLDS = {
  *
  * @param contractAddress - EVM contract address (0x...)
  * @param chain           - Chain name ("base", "ethereum") or raw chain ID
- * @param etherscanKey    - Etherscan V2 API key
  */
 export async function screenToken(
   contractAddress: string,
-  chain: string,
-  etherscanKey: string
+  chain: string
 ): Promise<TokenScreenResult> {
   const chainId = resolveChainId(chain);
   const riskFlags: string[] = [];
@@ -56,7 +55,7 @@ export async function screenToken(
   const [dexData, goplusData, creationData] = await Promise.all([
     getDexScreenerData(contractAddress),
     getGoPlusTokenSecurity(chainId, contractAddress),
-    getContractCreationTx(chainId, contractAddress, etherscanKey),
+    getContractCreationTx(chainId, contractAddress),
   ]);
 
   // ── Token Identity ────────────────────────────────────────────────────────
@@ -90,11 +89,10 @@ export async function screenToken(
   let deployerPreviousContracts = 0;
   let deployerFlagged = false;
 
-  if (deployerAddress && etherscanKey) {
+  if (deployerAddress && hasExplorerKey(chainId)) {
     deployerPreviousContracts = await getDeployerPreviousContracts(
       chainId,
-      deployerAddress,
-      etherscanKey
+      deployerAddress
     );
 
     if (deployerPreviousContracts > THRESHOLDS.SERIAL_LAUNCHER_THRESHOLD) {
@@ -138,13 +136,13 @@ export async function screenToken(
     riskFlags.push("Blacklist function present — wallets can be frozen");
 
   // ── Phase 3: Early Buyer / Sniper Analysis ────────────────────────────────
-  const earlyBuyers = etherscanKey
-    ? await getEarlyBuyers(chainId, contractAddress, etherscanKey)
+  const earlyBuyers = hasExplorerKey(chainId)
+    ? await getEarlyBuyers(chainId, contractAddress)
     : [];
 
   const { snipers, bundlers } =
     earlyBuyers.length > 0
-      ? await flagSniperWallets(chainId, earlyBuyers, etherscanKey)
+      ? await flagSniperWallets(chainId, earlyBuyers)
       : { snipers: [], bundlers: [] };
 
   const sniperHeldPercent =

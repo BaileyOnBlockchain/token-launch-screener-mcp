@@ -9,7 +9,7 @@
  *   CAUTION     – multiple warning signals without hard proof of malice
  *   SAFE        – no significant flags detected
  */
-import { getDexScreenerData, getGoPlusTokenSecurity, getContractCreationTx, getDeployerPreviousContracts, getEarlyBuyers, flagSniperWallets, resolveChainId, } from "../services/apis.js";
+import { getDexScreenerData, getGoPlusTokenSecurity, getContractCreationTx, getDeployerPreviousContracts, getEarlyBuyers, flagSniperWallets, resolveChainId, hasExplorerKey, } from "../services/apis.js";
 // ─── Risk Thresholds ──────────────────────────────────────────────────────────
 const THRESHOLDS = {
     MIN_LIQUIDITY_USD: 5000, // Below this = illiquid / easy rug
@@ -28,16 +28,15 @@ const THRESHOLDS = {
  *
  * @param contractAddress - EVM contract address (0x...)
  * @param chain           - Chain name ("base", "ethereum") or raw chain ID
- * @param etherscanKey    - Etherscan V2 API key
  */
-export async function screenToken(contractAddress, chain, etherscanKey) {
+export async function screenToken(contractAddress, chain) {
     const chainId = resolveChainId(chain);
     const riskFlags = [];
     // ── Phase 1: Fetch all primary data sources in parallel ──────────────────
     const [dexData, goplusData, creationData] = await Promise.all([
         getDexScreenerData(contractAddress),
         getGoPlusTokenSecurity(chainId, contractAddress),
-        getContractCreationTx(chainId, contractAddress, etherscanKey),
+        getContractCreationTx(chainId, contractAddress),
     ]);
     // ── Token Identity ────────────────────────────────────────────────────────
     const tokenName = goplusData?.token_name ?? dexData?.baseToken?.name ?? "Unknown";
@@ -61,8 +60,8 @@ export async function screenToken(contractAddress, chain, etherscanKey) {
     // ── Phase 2: Deployer History (requires Etherscan coverage) ───────────────
     let deployerPreviousContracts = 0;
     let deployerFlagged = false;
-    if (deployerAddress && etherscanKey) {
-        deployerPreviousContracts = await getDeployerPreviousContracts(chainId, deployerAddress, etherscanKey);
+    if (deployerAddress && hasExplorerKey(chainId)) {
+        deployerPreviousContracts = await getDeployerPreviousContracts(chainId, deployerAddress);
         if (deployerPreviousContracts > THRESHOLDS.SERIAL_LAUNCHER_THRESHOLD) {
             deployerFlagged = true;
             riskFlags.push(`Deployer has launched ${deployerPreviousContracts} previous contracts (serial launcher pattern)`);
@@ -99,11 +98,11 @@ export async function screenToken(contractAddress, chain, etherscanKey) {
     if (hasBlacklist)
         riskFlags.push("Blacklist function present — wallets can be frozen");
     // ── Phase 3: Early Buyer / Sniper Analysis ────────────────────────────────
-    const earlyBuyers = etherscanKey
-        ? await getEarlyBuyers(chainId, contractAddress, etherscanKey)
+    const earlyBuyers = hasExplorerKey(chainId)
+        ? await getEarlyBuyers(chainId, contractAddress)
         : [];
     const { snipers, bundlers } = earlyBuyers.length > 0
-        ? await flagSniperWallets(chainId, earlyBuyers, etherscanKey)
+        ? await flagSniperWallets(chainId, earlyBuyers)
         : { snipers: [], bundlers: [] };
     const sniperHeldPercent = earlyBuyers.length > 0
         ? Math.round((snipers.length / earlyBuyers.length) * 100)

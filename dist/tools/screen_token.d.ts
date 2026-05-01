@@ -16,7 +16,6 @@ import { TokenScreenResult } from "../types.js";
  *
  * @param contractAddress - EVM contract address (0x...)
  * @param chain           - Chain name ("base", "ethereum") or raw chain ID
- * @param etherscanKey    - Etherscan V2 API key
  */
-export declare function screenToken(contractAddress: string, chain: string, etherscanKey: string): Promise<TokenScreenResult>;
+export declare function screenToken(contractAddress: string, chain: string): Promise<TokenScreenResult>;
 //# sourceMappingURL=screen_token.d.ts.map

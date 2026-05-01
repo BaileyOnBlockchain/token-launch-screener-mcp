@@ -4,7 +4,11 @@
  * Three data sources, all with graceful fallback on failure:
  *   • DexScreener  – liquidity, pair creation time, price
  *   • GoPlus       – honeypot check, tax, ownership flags (no API key required)
- *   • Etherscan V2 – deployer history, early buyers, sniper detection
+ *   • Block Explorers – deployer history, early buyers, sniper detection
+ *
+ * Each chain uses its own Etherscan-compatible explorer API (same format, different
+ * base URL and API key). Ethereum uses Etherscan V2; Base uses BaseScan; BSC uses
+ * BscScan; etc.
  *
  * Design principle: every function returns null / [] / 0 on error rather than
  * throwing. The screener builds its verdict from whatever data is available.
@@ -23,8 +27,30 @@ import {
 const TIMEOUT_MS = 10_000;
 const SNIPER_SAMPLE_SIZE = 20; // Max wallets to deep-check (keeps latency under 30s)
 
-/** Etherscan V2 unified endpoint — one key covers Ethereum mainnet */
-const ETHERSCAN_V2 = "https://api.etherscan.io/v2/api";
+// ─── Chain Explorer Configuration ────────────────────────────────────────────
+
+interface ExplorerEntry {
+  url:         string;
+  envKey:      string;
+  // Etherscan V2 is a unified multi-chain endpoint that requires ?chainid=N.
+  // Chain-specific explorers (BaseScan, BscScan, etc.) don't accept chainid.
+  passChainId: boolean;
+}
+
+/**
+ * Maps numeric chain IDs to their block explorer config.
+ * Etherscan V2 is a unified endpoint that covers all 60+ EVM chains with one
+ * API key — just pass the correct chainid parameter per request.
+ */
+const CHAIN_EXPLORER_MAP: Record<string, ExplorerEntry> = {
+  "1":     { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "8453":  { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "56":    { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "137":   { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "42161": { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "10":    { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+  "43114": { url: "https://api.etherscan.io/v2/api", envKey: "ETHERSCAN_API_KEY", passChainId: true },
+};
 
 /** Human-readable chain name → numeric chain ID */
 const CHAIN_ID_MAP: Record<string, string> = {
@@ -51,6 +77,33 @@ const CHAIN_ID_MAP: Record<string, string> = {
  */
 export function resolveChainId(chain: string): string {
   return CHAIN_ID_MAP[chain.toLowerCase()] ?? chain;
+}
+
+interface ResolvedExplorer {
+  url:         string;
+  key:         string;
+  passChainId: boolean;
+}
+
+/** Looks up the explorer URL + API key for the given chain ID. Returns null if no key is configured. */
+function resolveExplorer(chainId: string): ResolvedExplorer | null {
+  const entry = CHAIN_EXPLORER_MAP[chainId];
+  if (!entry) return null;
+  const key = process.env[entry.envKey] ?? "";
+  if (!key) return null;
+  return { url: entry.url, key, passChainId: entry.passChainId };
+}
+
+/** Returns true if a block explorer API key is configured for this chain. */
+export function hasExplorerKey(chainId: string): boolean {
+  return resolveExplorer(chainId) !== null;
+}
+
+/** Returns the chain IDs that have explorer API keys set in the environment. */
+export function getConfiguredChains(): string[] {
+  return Object.entries(CHAIN_EXPLORER_MAP)
+    .filter(([, entry]) => !!process.env[entry.envKey])
+    .map(([chainId]) => chainId);
 }
 
 // ─── DexScreener ─────────────────────────────────────────────────────────────
@@ -113,41 +166,41 @@ export async function getGoPlusTokenSecurity(
   }
 }
 
-// ─── Etherscan V2 ─────────────────────────────────────────────────────────────
+// ─── Block Explorer APIs ──────────────────────────────────────────────────────
 //
-// Note: Etherscan V2 free tier covers Ethereum mainnet (chainId 1).
-// For other chains (Base, BSC, etc.) an upgraded plan is required.
-// The screener handles partial data gracefully — GoPlus + DexScreener
-// still provide core risk signals without Etherscan chain coverage.
+// All four functions below use the Etherscan-compatible API format shared by
+// BaseScan, BscScan, PolygonScan, Arbiscan, etc. The correct endpoint and API
+// key are resolved automatically from the chain ID via CHAIN_EXPLORER_MAP.
 
 /**
  * Retrieves the contract deployer address and deployment timestamp.
  */
 export async function getContractCreationTx(
   chainId: string,
-  contractAddress: string,
-  apiKey: string
+  contractAddress: string
 ): Promise<{ deployer: string; timestamp: number } | null> {
+  const explorer = resolveExplorer(chainId);
+  if (!explorer) return null;
+
   try {
+    const params: Record<string, string | number> = {
+      module:            "contract",
+      action:            "getcontractcreation",
+      contractaddresses: contractAddress,
+      apikey:            explorer.key,
+    };
+    if (explorer.passChainId) params.chainid = chainId;
+
     const res: AxiosResponse<{ result: ContractCreationResult[] }> =
-      await axios.get(ETHERSCAN_V2, {
-        params: {
-          chainid: chainId,
-          module: "contract",
-          action: "getcontractcreation",
-          contractaddresses: contractAddress,
-          apikey: apiKey,
-        },
-        timeout: TIMEOUT_MS,
-      });
+      await axios.get(explorer.url, { params, timeout: TIMEOUT_MS });
 
     const record = res.data?.result?.[0];
     if (!record) return null;
 
     return {
       deployer: record.contractCreator ?? "",
-      // Etherscan V2 getcontractcreation doesn't include timestamp directly —
-      // we derive rough age from pairCreatedAt in DexScreener instead
+      // getcontractcreation doesn't include timestamp on all explorers —
+      // we derive rough age from pairCreatedAt in DexScreener as fallback
       timestamp: record.timestamp ? parseInt(record.timestamp) * 1000 : Date.now(),
     };
   } catch {
@@ -161,26 +214,25 @@ export async function getContractCreationTx(
  */
 export async function getDeployerPreviousContracts(
   chainId: string,
-  deployerAddress: string,
-  apiKey: string
+  deployerAddress: string
 ): Promise<number> {
+  const explorer = resolveExplorer(chainId);
+  if (!explorer) return 0;
+
   try {
-    const res: AxiosResponse<{ result: EtherscanTx[] }> = await axios.get(
-      ETHERSCAN_V2,
-      {
-        params: {
-          chainid: chainId,
-          module: "account",
-          action: "txlist",
-          address: deployerAddress,
-          sort: "asc",
-          apikey: apiKey,
-          page: 1,
-          offset: 100,
-        },
-        timeout: TIMEOUT_MS,
-      }
-    );
+    const params: Record<string, string | number> = {
+      module:  "account",
+      action:  "txlist",
+      address: deployerAddress,
+      sort:    "asc",
+      apikey:  explorer.key,
+      page:    1,
+      offset:  100,
+    };
+    if (explorer.passChainId) params.chainid = chainId;
+
+    const res: AxiosResponse<{ result: EtherscanTx[] }> =
+      await axios.get(explorer.url, { params, timeout: TIMEOUT_MS });
 
     const txs = res.data?.result ?? [];
     // Contract creation txs have an empty "to" field
@@ -196,26 +248,25 @@ export async function getDeployerPreviousContracts(
  */
 export async function getEarlyBuyers(
   chainId: string,
-  contractAddress: string,
-  apiKey: string
+  contractAddress: string
 ): Promise<string[]> {
+  const explorer = resolveExplorer(chainId);
+  if (!explorer) return [];
+
   try {
-    const res: AxiosResponse<{ result: EtherscanTx[] }> = await axios.get(
-      ETHERSCAN_V2,
-      {
-        params: {
-          chainid: chainId,
-          module: "account",
-          action: "tokentx",
-          contractaddress: contractAddress,
-          sort: "asc",
-          apikey: apiKey,
-          page: 1,
-          offset: 200,
-        },
-        timeout: TIMEOUT_MS,
-      }
-    );
+    const params: Record<string, string | number> = {
+      module:          "account",
+      action:          "tokentx",
+      contractaddress: contractAddress,
+      sort:            "asc",
+      apikey:          explorer.key,
+      page:            1,
+      offset:          200,
+    };
+    if (explorer.passChainId) params.chainid = chainId;
+
+    const res: AxiosResponse<{ result: EtherscanTx[] }> =
+      await axios.get(explorer.url, { params, timeout: TIMEOUT_MS });
 
     const txs = res.data?.result ?? [];
     const buyers = new Set<string>();
@@ -244,9 +295,11 @@ export async function getEarlyBuyers(
  */
 export async function flagSniperWallets(
   chainId: string,
-  wallets: string[],
-  apiKey: string
+  wallets: string[]
 ): Promise<{ snipers: string[]; bundlers: string[] }> {
+  const explorer = resolveExplorer(chainId);
+  if (!explorer) return { snipers: [], bundlers: [] };
+
   const snipers: string[] = [];
   const bundlers: string[] = [];
 
@@ -255,22 +308,19 @@ export async function flagSniperWallets(
   await Promise.allSettled(
     sample.map(async (wallet) => {
       try {
-        const res: AxiosResponse<{ result: EtherscanTx[] }> = await axios.get(
-          ETHERSCAN_V2,
-          {
-            params: {
-              chainid: chainId,
-              module: "account",
-              action: "txlist",
-              address: wallet,
-              sort: "asc",
-              apikey: apiKey,
-              page: 1,
-              offset: 20,
-            },
-            timeout: 5_000,
-          }
-        );
+        const params: Record<string, string | number> = {
+          module:  "account",
+          action:  "txlist",
+          address: wallet,
+          sort:    "asc",
+          apikey:  explorer.key,
+          page:    1,
+          offset:  20,
+        };
+        if (explorer.passChainId) params.chainid = chainId;
+
+        const res: AxiosResponse<{ result: EtherscanTx[] }> =
+          await axios.get(explorer.url, { params, timeout: 5_000 });
 
         const txCount = res.data?.result?.length ?? 0;
         if (txCount < 5) snipers.push(wallet);

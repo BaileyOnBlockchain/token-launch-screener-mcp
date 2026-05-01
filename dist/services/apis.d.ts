@@ -4,7 +4,11 @@
  * Three data sources, all with graceful fallback on failure:
  *   • DexScreener  – liquidity, pair creation time, price
  *   • GoPlus       – honeypot check, tax, ownership flags (no API key required)
- *   • Etherscan V2 – deployer history, early buyers, sniper detection
+ *   • Block Explorers – deployer history, early buyers, sniper detection
+ *
+ * Each chain uses its own Etherscan-compatible explorer API (same format, different
+ * base URL and API key). Ethereum uses Etherscan V2; Base uses BaseScan; BSC uses
+ * BscScan; etc.
  *
  * Design principle: every function returns null / [] / 0 on error rather than
  * throwing. The screener builds its verdict from whatever data is available.
@@ -15,6 +19,10 @@ import { DexScreenerPair, GoPlusTokenSecurity } from "../types.js";
  * e.g. "base" → "8453", "137" → "137"
  */
 export declare function resolveChainId(chain: string): string;
+/** Returns true if a block explorer API key is configured for this chain. */
+export declare function hasExplorerKey(chainId: string): boolean;
+/** Returns the chain IDs that have explorer API keys set in the environment. */
+export declare function getConfiguredChains(): string[];
 /**
  * Fetches the highest-liquidity trading pair for a token from DexScreener.
  * Returns null if the token has no pairs or the request fails.
@@ -29,7 +37,7 @@ export declare function getGoPlusTokenSecurity(chainId: string, contractAddress:
 /**
  * Retrieves the contract deployer address and deployment timestamp.
  */
-export declare function getContractCreationTx(chainId: string, contractAddress: string, apiKey: string): Promise<{
+export declare function getContractCreationTx(chainId: string, contractAddress: string): Promise<{
     deployer: string;
     timestamp: number;
 } | null>;
@@ -37,12 +45,12 @@ export declare function getContractCreationTx(chainId: string, contractAddress: 
  * Counts how many contracts the deployer has previously deployed.
  * High count (>3) is a strong serial-launcher signal.
  */
-export declare function getDeployerPreviousContracts(chainId: string, deployerAddress: string, apiKey: string): Promise<number>;
+export declare function getDeployerPreviousContracts(chainId: string, deployerAddress: string): Promise<number>;
 /**
  * Returns the first 50 unique buyer wallet addresses from token transfer history.
  * Earlier wallets = higher sniper suspicion.
  */
-export declare function getEarlyBuyers(chainId: string, contractAddress: string, apiKey: string): Promise<string[]>;
+export declare function getEarlyBuyers(chainId: string, contractAddress: string): Promise<string[]>;
 /**
  * Heuristic sniper/bundler detection based on wallet transaction history.
  *
@@ -51,7 +59,7 @@ export declare function getEarlyBuyers(chainId: string, contractAddress: string,
  *
  * Checks up to SNIPER_SAMPLE_SIZE wallets in parallel to stay within latency budget.
  */
-export declare function flagSniperWallets(chainId: string, wallets: string[], apiKey: string): Promise<{
+export declare function flagSniperWallets(chainId: string, wallets: string[]): Promise<{
     snipers: string[];
     bundlers: string[];
 }>;

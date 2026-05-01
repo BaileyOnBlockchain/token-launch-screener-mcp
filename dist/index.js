@@ -9,6 +9,7 @@ import { createContextMiddleware } from "@ctxprotocol/sdk";
 import express from "express";
 import { z } from "zod";
 import { screenToken } from "./tools/screen_token.js";
+import { getConfiguredChains } from "./services/apis.js";
 // ─── Input Schema ────────────────────────────────────────────────────────────
 const screenInputSchema = {
     contract_address: z
@@ -76,7 +77,6 @@ function toNumericScore(riskScore, flagCount) {
 // The MCP SDK throws "Already connected" if server.connect() is called twice on
 // the same instance, which would break the platform's initialize → tools/list
 // two-step handshake.  Creating one instance per request avoids that entirely.
-const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY ?? "";
 function createMcpServer() {
     const server = new McpServer({
         name: "token-launch-screener-mcp-server",
@@ -85,15 +85,15 @@ function createMcpServer() {
     // @ts-ignore — TS2589: false positive with MCP SDK v1.29 generic inference depth
     server.registerTool("screen_new_token", {
         title: "Token Launch Risk Screener",
-        description: `Real-time due diligence on a newly launched EVM token. Aggregates GoPlus Security, DexScreener, and Etherscan V2 into a single risk verdict in under 30 seconds.
+        description: `Real-time due diligence on a newly launched EVM token. Aggregates GoPlus Security, DexScreener, and chain-specific block explorers into a single risk verdict in under 30 seconds.
 
-Replaces the manual workflow of checking DexScreener + DEXTools Pro + Token Sniffer + Etherscan separately ($99/month combined). Returns structured, actionable data from one call.
+Replaces the manual workflow of checking DexScreener + DEXTools Pro + Token Sniffer + block explorers separately ($99/month combined). Returns structured, actionable data from one call.
 
 WHAT IT CHECKS:
 - Honeypot detection and buy/sell tax (GoPlus — no API key required, very reliable)
 - Liquidity size and lock status (DexScreener)
-- Contract age and deployer serial-launcher history (Etherscan V2)
-- First 50 buyer wallets — flagged for sniper/bundler patterns (Etherscan V2)
+- Contract age and deployer serial-launcher history (BaseScan / BscScan / Etherscan per chain)
+- First 50 buyer wallets — flagged for sniper/bundler patterns (chain-specific explorer)
 - Composite risk verdict: SAFE / CAUTION / LIKELY_RUG
 
 ARGS:
@@ -123,25 +123,8 @@ SKIP FOR: Tokens older than 7 days, general crypto questions without a specific 
     async (params) => {
         const contract_address = params.contract_address;
         const resolvedChain = params.chain ?? "base";
-        if (!ETHERSCAN_API_KEY) {
-            return {
-                content: [{
-                        type: "text",
-                        text: [
-                            "ETHERSCAN_API_KEY is not set.",
-                            "",
-                            "GoPlus and DexScreener data will still be returned, but chain history,",
-                            "deployer analysis, and sniper detection require an Etherscan V2 key.",
-                            "",
-                            "Get a free key at: https://etherscan.io/apikey",
-                            "Then set: ETHERSCAN_API_KEY=your_key in your .env file and restart.",
-                        ].join("\n"),
-                    }],
-                isError: true,
-            };
-        }
         try {
-            const result = await screenToken(contract_address, resolvedChain, ETHERSCAN_API_KEY);
+            const result = await screenToken(contract_address, resolvedChain);
             // Build structured output — every field matches screenOutputSchema exactly.
             // Source data is serialised to JSON strings so the schema stays flat
             // (no z.record / z.unknown / z.any needed).
@@ -246,10 +229,11 @@ async function runHTTP() {
     });
     const port = parseInt(process.env.PORT ?? "3000");
     app.listen(port, () => {
+        const chains = getConfiguredChains();
         process.stderr.write(`Token Launch Screener MCP running\n`);
         process.stderr.write(`   Endpoint : http://localhost:${port}/mcp\n`);
         process.stderr.write(`   Health   : http://localhost:${port}/health\n`);
-        process.stderr.write(`   Etherscan: ${ETHERSCAN_API_KEY ? "configured" : "NOT SET"}\n`);
+        process.stderr.write(`   Explorers: ${chains.length ? `chains ${chains.join(", ")}` : "NONE — sniper detection disabled"}\n`);
     });
 }
 // ─── stdio Transport ─────────────────────────────────────────────────────────
